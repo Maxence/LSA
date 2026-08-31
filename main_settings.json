@@ -1,0 +1,12 @@
+{
+  "main_name": "Main",
+  "listen_host": "0.0.0.0",
+  "port": 45880,
+  "discovery_port": 45881,
+  "pairing_key": "7PYX-NW1O-LDYO",
+  "attack_trigger_key": "F2",
+  "follow_trigger_key": "F3",
+  "target_process": "L2.exe",
+  "require_target_foreground": true,
+  "poll_interval_ms": 10
+}

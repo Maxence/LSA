@@ -1,0 +1,13 @@
+IbInputSimulator.dll
+====================
+
+Origine: copie inchangée du fichier fourni dans mobpixel.zip par l'utilisateur.
+Architecture PE: x86-64 (PE32+).
+SHA-256: bef07e9d4af9dd9035efafe8881f23c9f81c858483651ea5808262794819f8f9
+
+Exports utilisés par cette version:
+- IbSendInit
+- IbSendDestroy
+- IbSend_keybd_event
+
+La DLL n'a pas été exécutée dans l'environnement Linux de construction. Son fonctionnement réel avec le matériel et le logiciel Logitech doit être validé sous Windows.

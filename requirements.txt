@@ -1,0 +1,2 @@
+# Aucune dépendance Python externe.
+# Tkinter et ctypes sont inclus avec l'installation standard de Python sous Windows.

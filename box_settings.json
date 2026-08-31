@@ -1,0 +1,15 @@
+{
+  "box_name": "Box 1",
+  "main_host": "AUTO",
+  "port": 45880,
+  "discovery_port": 45881,
+  "pairing_key": "7PYX-NW1O-LDYO",
+  "attack_output_key": "&",
+  "follow_output_key": "VK_2",
+  "hold_ms": 45,
+  "target_process": "L2.exe",
+  "require_target_foreground": true,
+  "driver": "Logitech",
+  "dll_path": "IbInputSimulator.dll",
+  "reconnect_delay_sec": 2.0
+}
