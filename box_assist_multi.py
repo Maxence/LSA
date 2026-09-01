@@ -7,7 +7,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import Any
+from typing import Any, Iterable
 
 import box_assist as base
 from assist_common import action_label, get_foreground_info, save_json_config
@@ -22,11 +22,20 @@ from window_targeting import (
 )
 
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 MULTI_WINDOW_FOCUS_SETTLE_SEC = 0.060
+OUTPUT_DEFAULTS_VERSION = 2
+NEW_DEFAULT_ATTACK_KEY = "-"
+NEW_DEFAULT_FOLLOW_KEY = "&"
+OLD_DEFAULT_KEY_PAIR = ("&", "VK_2")
 MULTI_DEFAULTS: dict[str, Any] = {
     "multi_window_enabled": False,
 }
+
+# START_BOX*.bat launches this wrapper. Override the historical defaults before
+# the base Box app loads or creates its configuration.
+base.BOX_DEFAULTS["attack_output_key"] = NEW_DEFAULT_ATTACK_KEY
+base.BOX_DEFAULTS["follow_output_key"] = NEW_DEFAULT_FOLLOW_KEY
 
 LEGACY_CONFIG_PATH = base.CONFIG_PATH
 
@@ -68,6 +77,12 @@ CONFIG_PATH = _prepare_runtime_config()
 base.APP_VERSION = APP_VERSION
 
 
+def _walk_widgets(widget: tk.Misc) -> Iterable[tk.Misc]:
+    for child in widget.winfo_children():
+        yield child
+        yield from _walk_widgets(child)
+
+
 class BoxAssistApp(base.BoxAssistApp):
     """Box Assist with an optional fan-out to every local Lineage 2 window."""
 
@@ -78,10 +93,30 @@ class BoxAssistApp(base.BoxAssistApp):
     def _load_config(self) -> dict[str, Any]:
         config = super()._load_config()
         changed = False
+
         for key, value in MULTI_DEFAULTS.items():
             if key not in config:
                 config[key] = value
                 changed = True
+
+        try:
+            defaults_version = int(config.get("output_defaults_version", 0))
+        except (TypeError, ValueError):
+            defaults_version = 0
+
+        if defaults_version < OUTPUT_DEFAULTS_VERSION:
+            current_pair = (
+                str(config.get("attack_output_key", "")).strip(),
+                str(config.get("follow_output_key", "")).strip(),
+            )
+            # Only replace the exact old factory pair. Custom user mappings are
+            # preserved, even when they come from an older configuration file.
+            if current_pair == OLD_DEFAULT_KEY_PAIR:
+                config["attack_output_key"] = NEW_DEFAULT_ATTACK_KEY
+                config["follow_output_key"] = NEW_DEFAULT_FOLLOW_KEY
+            config["output_defaults_version"] = OUTPUT_DEFAULTS_VERSION
+            changed = True
+
         if changed:
             try:
                 save_json_config(base.CONFIG_PATH, config)
@@ -101,6 +136,23 @@ class BoxAssistApp(base.BoxAssistApp):
             return
         outer = children[0]
 
+        # The historical UI is inherited from box_assist.py. Adjust its helper
+        # text so it reflects the defaults used by this launcher.
+        for widget in _walk_widgets(outer):
+            try:
+                text = str(widget.cget("text"))
+            except Exception:
+                continue
+            if isinstance(widget, ttk.Label) and text.startswith("Par défaut: Attaquer joue"):
+                widget.configure(
+                    text=(
+                        "Par défaut: Attaquer joue '-' (touche physique 6 en AZERTY), "
+                        "Suivre joue '&' (touche physique 1)."
+                    )
+                )
+            elif isinstance(widget, ttk.Checkbutton) and text.startswith("Ne jamais injecter une touche"):
+                widget.configure(text=text + " (mode simple uniquement)")
+
         multi_frame = ttk.LabelFrame(outer, text="Multi-fenêtres L2 (optionnel)", padding=8)
         ttk.Checkbutton(
             multi_frame,
@@ -110,7 +162,7 @@ class BoxAssistApp(base.BoxAssistApp):
         ttk.Label(
             multi_frame,
             text=(
-                "Désactivé par défaut. Quand il est activé, la Box donne brièvement le focus à chaque client L2, "
+                "Désactivé par défaut. Une fois activé, la Box donne brièvement le focus à chaque client L2, "
                 "envoie la touche Logitech, puis restaure la fenêtre qui était active."
             ),
             style="Muted.TLabel",
@@ -120,7 +172,8 @@ class BoxAssistApp(base.BoxAssistApp):
         ttk.Label(
             multi_frame,
             text=(
-                "Si la sécurité de focus ci-dessus reste cochée, une fenêtre L2 doit déjà être active avant le fan-out."
+                "Le mode multi-fenêtres fonctionne même si Box Assist ou une autre application est au premier plan. "
+                "Le focus de chaque L2 est vérifié avant l'injection."
             ),
             style="Muted.TLabel",
             wraplength=940,
@@ -151,6 +204,7 @@ class BoxAssistApp(base.BoxAssistApp):
     def _collect_config(self) -> dict[str, Any]:
         config = super()._collect_config()
         config["multi_window_enabled"] = bool(self.multi_window_var.get())
+        config["output_defaults_version"] = OUTPUT_DEFAULTS_VERSION
         return config
 
     @staticmethod
@@ -177,10 +231,6 @@ class BoxAssistApp(base.BoxAssistApp):
         with self._multi_action_lock:
             original = get_foreground_info()
             target_process = str(config["target_process"])
-            if bool(config["require_target_foreground"]) and not original.matches(target_process):
-                active = original.process_name or "aucune fenêtre"
-                return False, f"Injection annulée: fenêtre active {active}, attendu {target_process}."
-
             targets = self._ordered_targets(list_target_windows(target_process), int(original.hwnd))
             if not targets:
                 return False, f"Aucune fenêtre visible correspondant à {target_process} n'a été trouvée."
