@@ -303,6 +303,22 @@ class NetworkIntegrationTests(unittest.TestCase):
     def _wait_for_event(self, events: queue.Queue[dict], event_type: str, timeout: float = 5.0) -> dict:
         return self._wait_for_matching(events, lambda event: event.get("type") == event_type, timeout=timeout)
 
+    def _wait_for_peer_count(
+        self,
+        server: MainAssistServer,
+        expected: int,
+        *,
+        timeout: float = 5.0,
+    ) -> list[dict]:
+        deadline = time.monotonic() + timeout
+        snapshot: list[dict] = []
+        while time.monotonic() < deadline:
+            snapshot = server.peer_snapshot()
+            if len(snapshot) == expected:
+                return snapshot
+            time.sleep(0.01)
+        self.fail(f"Expected {expected} connected peer(s), got {len(snapshot)}")
+
     @staticmethod
     def _make_client(
         *,
@@ -316,7 +332,7 @@ class NetworkIntegrationTests(unittest.TestCase):
         return BoxAssistClient(
             client_id=client_id,
             box_name=box_name,
-            action_keys={ACTION_ATTACK: "&", ACTION_FOLLOW: "VK_2"},
+            action_keys={ACTION_ATTACK: "-", ACTION_FOLLOW: "&"},
             main_host="127.0.0.1",
             port=server.port,
             discovery_port=0,
@@ -357,10 +373,9 @@ class NetworkIntegrationTests(unittest.TestCase):
         try:
             connected = self._wait_for_event(client_events, "connected")
             self.assertEqual(connected["main_name"], "Test Main")
-            peers = server.peer_snapshot()
-            self.assertEqual(len(peers), 1)
-            self.assertEqual(peers[0]["action_keys"][ACTION_ATTACK], "&")
-            self.assertEqual(peers[0]["action_keys"][ACTION_FOLLOW], "VK_2")
+            peers = self._wait_for_peer_count(server, 1)
+            self.assertEqual(peers[0]["action_keys"][ACTION_ATTACK], "-")
+            self.assertEqual(peers[0]["action_keys"][ACTION_FOLLOW], "&")
 
             for expected_action, trigger in ((ACTION_ATTACK, "F2"), (ACTION_FOLLOW, "F3")):
                 event_id, sent = server.broadcast_action(
@@ -424,10 +439,7 @@ class NetworkIntegrationTests(unittest.TestCase):
         client_two.start()
 
         try:
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline and len(server.peer_snapshot()) < 2:
-                time.sleep(0.02)
-            self.assertEqual(len(server.peer_snapshot()), 2)
+            self._wait_for_peer_count(server, 2)
 
             event_id, sent = server.broadcast_action(action=ACTION_FOLLOW, trigger="F3", source="test")
             self.assertEqual(sent, 2)
@@ -475,10 +487,7 @@ class NetworkIntegrationTests(unittest.TestCase):
         client.start()
 
         try:
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline and len(server.peer_snapshot()) < 1:
-                time.sleep(0.02)
-            self.assertEqual(len(server.peer_snapshot()), 1)
+            self._wait_for_peer_count(server, 1)
 
             threads: list[threading.Thread] = []
             for index in range(20):
@@ -536,7 +545,7 @@ class NetworkIntegrationTests(unittest.TestCase):
         try:
             connected = self._wait_for_event(client_events, "connected")
             self.assertEqual(connected["main_name"], "Unicode Main")
-            self.assertEqual(len(server.peer_snapshot()), 1)
+            self._wait_for_peer_count(server, 1)
         finally:
             client.stop()
             server.stop()
@@ -606,6 +615,7 @@ class NetworkIntegrationTests(unittest.TestCase):
         try:
             first_connection = self._wait_for_event(client_events, "connected")
             self.assertEqual(first_connection["main_name"], "Main One")
+            self._wait_for_peer_count(server_one, 1)
 
             server_one.stop()
             self._wait_for_event(client_events, "disconnected")
@@ -620,6 +630,7 @@ class NetworkIntegrationTests(unittest.TestCase):
             server_two.start()
             second_connection = self._wait_for_event(client_events, "connected", timeout=8.0)
             self.assertEqual(second_connection["main_name"], "Main Two")
+            self._wait_for_peer_count(server_two, 1)
 
             _, sent = server_two.broadcast_action(action=ACTION_FOLLOW, trigger="F3", source="test")
             self.assertEqual(sent, 1)
