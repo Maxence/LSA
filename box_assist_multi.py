@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 import time
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 from typing import Any
 
@@ -19,11 +22,47 @@ from window_targeting import (
 )
 
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 MULTI_WINDOW_FOCUS_SETTLE_SEC = 0.060
 MULTI_DEFAULTS: dict[str, Any] = {
     "multi_window_enabled": False,
 }
+
+LEGACY_CONFIG_PATH = base.CONFIG_PATH
+
+
+def _runtime_config_path() -> Path:
+    """Keep mutable Box settings outside the Git checkout on Windows."""
+    local_app_data = str(os.environ.get("LOCALAPPDATA", "")).strip()
+    if not local_app_data:
+        return LEGACY_CONFIG_PATH
+    return Path(local_app_data) / "LSA" / "box_settings.json"
+
+
+def _prepare_runtime_config() -> Path:
+    runtime_path = _runtime_config_path()
+    try:
+        same_path = runtime_path.resolve() == LEGACY_CONFIG_PATH.resolve()
+    except OSError:
+        same_path = runtime_path == LEGACY_CONFIG_PATH
+
+    if same_path:
+        return LEGACY_CONFIG_PATH
+
+    try:
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        if not runtime_path.exists() and LEGACY_CONFIG_PATH.exists():
+            shutil.copy2(LEGACY_CONFIG_PATH, runtime_path)
+        base.CONFIG_PATH = runtime_path
+        return runtime_path
+    except OSError:
+        # A restricted Windows profile should still be able to use the legacy
+        # in-folder configuration rather than preventing the app from starting.
+        base.CONFIG_PATH = LEGACY_CONFIG_PATH
+        return LEGACY_CONFIG_PATH
+
+
+CONFIG_PATH = _prepare_runtime_config()
 
 # Keep the title/header produced by the existing UI in sync with this wrapper.
 base.APP_VERSION = APP_VERSION
@@ -83,6 +122,13 @@ class BoxAssistApp(base.BoxAssistApp):
             text=(
                 "Si la sécurité de focus ci-dessus reste cochée, une fenêtre L2 doit déjà être active avant le fan-out."
             ),
+            style="Muted.TLabel",
+            wraplength=940,
+            justify="left",
+        ).pack(anchor="w", pady=(2, 0))
+        ttk.Label(
+            multi_frame,
+            text=f"Réglages locaux: {CONFIG_PATH}",
             style="Muted.TLabel",
             wraplength=940,
             justify="left",
