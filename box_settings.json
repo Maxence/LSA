@@ -9,6 +9,7 @@
   "hold_ms": 45,
   "target_process": "L2.exe",
   "require_target_foreground": true,
+  "multi_window_enabled": false,
   "driver": "Logitech",
   "dll_path": "IbInputSimulator.dll",
   "reconnect_delay_sec": 2.0
