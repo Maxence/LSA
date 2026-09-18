@@ -1,4 +1,4 @@
-# L2 Simple Assist v2.3
+# L2 Simple Assist v2.4
 
 Petit système Main / Box pour Lineage 2 sous Windows.
 
@@ -10,8 +10,9 @@ Le programme ne capture pas l'écran, ne lit aucun pixel, n'utilise pas d'OCR et
 |---|---:|---:|
 | Attaquer | `F2` | `-` |
 | Suivre | `F3` | `&` |
+| Dance/Song (optionnel) | `F10` | `F10`, uniquement sur le personnage ciblé |
 
-Les quatre touches restent modifiables dans les interfaces.
+Les touches restent modifiables indépendamment dans les interfaces. Dance/Song est désactivé par défaut : activer l’option sur le Main, renseigner le pseudo exact du personnage et enregistrer. Voir [le guide Dance/Song ciblé](DANCE_SONG.md).
 
 Sur un clavier français AZERTY :
 
@@ -28,9 +29,9 @@ Le mode multi-fenêtres est disponible uniquement dans **Box Assist** et reste d
 
 Active l'option :
 
-> Envoyer chaque commande à tous les L2.exe ouverts sur cette Box
+> Envoyer Attaquer et Suivre à tous les L2.exe ouverts sur cette Box
 
-Pour chaque ordre reçu, la Box :
+Pour chaque ordre Attaquer ou Suivre reçu, la Box :
 
 1. détecte les fenêtres visibles appartenant au processus configuré ;
 2. garde la fenêtre actuellement active en mémoire ;
@@ -41,7 +42,7 @@ Pour chaque ordre reçu, la Box :
 
 Le mode fonctionne même si `python.exe`, Box Assist ou une autre application est au premier plan. La sécurité est assurée par la vérification du focus de chaque fenêtre juste avant l'injection. Si Windows refuse d'activer une fenêtre, aucune touche n'est envoyée à cette étape et l'échec est indiqué dans le journal.
 
-La case historique **Ne jamais injecter une touche si Lineage 2 n'est pas au premier plan** reste appliquée au mode simple, lorsque le mode multi-fenêtres est désactivé.
+La case historique **Ne jamais injecter une touche si Lineage 2 n'est pas au premier plan** reste appliquée à Attaquer/Suivre en mode simple, lorsque le mode multi-fenêtres est désactivé. Dance/Song sélectionne toujours sa fenêtre cible et vérifie son focus, indépendamment de ces options.
 
 Voir aussi [`MULTI_WINDOW.md`](MULTI_WINDOW.md).
 
@@ -135,7 +136,7 @@ Exemples :
 - des caractères dépendant de la disposition du clavier comme `-` ou `&` ;
 - des combinaisons simples comme `CTRL+F2`, `SHIFT+1` ou `ALT+F3`.
 
-Les deux actions doivent utiliser des touches différentes.
+Attaquer et Suivre doivent utiliser des touches différentes. Lorsque Dance/Song est activé, son déclencheur Main doit aussi utiliser une touche physique distincte.
 
 ## Processus Lineage 2
 

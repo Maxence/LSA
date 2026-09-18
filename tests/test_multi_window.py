@@ -39,7 +39,7 @@ class MultiWindowBoxTests(unittest.TestCase):
 
     def _app(self) -> BoxAssistApp:
         app = BoxAssistApp.__new__(BoxAssistApp)
-        app._multi_action_lock = threading.RLock()
+        app._action_lock = threading.RLock()
         return app
 
     def test_launcher_overrides_box_defaults_for_azerty(self) -> None:

@@ -2,7 +2,7 @@
 
 Le mode multi-fenêtres est une option **uniquement côté Box Assist**. Il est désactivé par défaut et ne change ni le Main Assist ni le protocole réseau.
 
-Quand l'option **Envoyer chaque commande à tous les L2.exe ouverts sur cette Box** est activée, la Box :
+Quand l'option **Envoyer Attaquer et Suivre à tous les L2.exe ouverts sur cette Box** est activée, la Box :
 
 1. repère les fenêtres visibles appartenant au processus configuré (`L2.exe` par défaut) ;
 2. garde la fenêtre actuellement active en mémoire, même si c'est Box Assist ou une autre application ;
@@ -13,7 +13,9 @@ Quand l'option **Envoyer chaque commande à tous les L2.exe ouverts sur cette Bo
 
 Le mode multi-fenêtres ne demande donc plus qu'un client L2 soit déjà au premier plan. Un message comme `fenêtre active python.exe` concernait l'ancien comportement à une seule fenêtre et n'indique pas une erreur de touche.
 
-La case **Ne jamais injecter une touche si Lineage 2 n'est pas au premier plan** continue de protéger le mode simple, lorsque l'option multi-fenêtres est désactivée.
+La case **Ne jamais injecter une touche si Lineage 2 n'est pas au premier plan** continue de protéger Attaquer/Suivre en mode simple, lorsque l'option multi-fenêtres est désactivée. Dance/Song vérifie toujours le focus de sa propre cible.
+
+Dance/Song fait exception au fan-out : il sélectionne uniquement le pseudo configuré sur le Main, même avec le mode multi-fenêtres activé. Voir [Dance/Song ciblé](DANCE_SONG.md).
 
 ## Touches Box par défaut
 

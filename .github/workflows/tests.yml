@@ -46,13 +46,3 @@ jobs:
 
       - name: Compile Python files
         run: python -m compileall -q .
-
-      - name: Package tracked sources for verification
-        run: git archive --format=zip --output=lsa-source.zip HEAD
-
-      - name: Upload verification sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: lsa-source
-          path: lsa-source.zip
-          retention-days: 1

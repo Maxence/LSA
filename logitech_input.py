@@ -5,7 +5,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from assist_common import APP_DIR, IS_WINDOWS, KeyChord, KeySpecError, resolve_key_spec
 
@@ -155,7 +155,14 @@ class LogitechInput:
         flags = KEYEVENTF_KEYUP if key_up else 0
         self._fn_keybd_event(ctypes.c_ubyte(vk_code), 0, flags, 0)
 
-    def tap(self, key_spec: str, hold_ms: int = 45, keyboard_layout: int = 0) -> InputResult:
+    def tap(
+        self,
+        key_spec: str,
+        hold_ms: int = 45,
+        keyboard_layout: int = 0,
+        *,
+        pre_send_check: Callable[[], bool] | None = None,
+    ) -> InputResult:
         try:
             chord = resolve_key_spec(key_spec, keyboard_layout)
         except KeySpecError as exc:
@@ -174,10 +181,14 @@ class LogitechInput:
         with self._lock:
             try:
                 for modifier in chord.modifiers:
+                    if pre_send_check is not None and not pre_send_check():
+                        return InputResult(False, "Injection annulée: cible ou focus perdu avant l'envoi.", chord)
                     self._send_event(modifier, key_up=False)
                     pressed_modifiers.append(modifier)
                     time.sleep(0.005)
 
+                if pre_send_check is not None and not pre_send_check():
+                    return InputResult(False, "Injection annulée: cible ou focus perdu avant l'envoi.", chord)
                 self._send_event(chord.vk_code, key_up=False)
                 base_pressed = True
                 time.sleep(hold_ms / 1000.0)

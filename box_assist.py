@@ -13,6 +13,7 @@ from typing import Any
 from assist_common import (
     ACTION_ATTACK,
     ACTION_FOLLOW,
+    ACTION_DANCE_SONG,
     APP_DIR,
     ConfigError,
     action_label,
@@ -29,10 +30,11 @@ from assist_common import (
 )
 from assist_network import BoxAssistClient, discover_main
 from logitech_input import DRIVER_CODES, DRIVER_DISPLAY_NAMES, LogitechInput
+from targeted_action import send_dance_song
 from ui_utils import add_labeled_entry, append_log, apply_dark_style, make_log_widget
 
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.4"
 CONFIG_PATH = APP_DIR / "box_settings.json"
 
 BOX_DEFAULTS: dict[str, Any] = {
@@ -43,6 +45,7 @@ BOX_DEFAULTS: dict[str, Any] = {
     "pairing_key": "",
     "attack_output_key": "&",
     "follow_output_key": "VK_2",
+    "dance_song_output_key": "F10",
     "hold_ms": 45,
     "target_process": "L2.exe",
     "require_target_foreground": True,
@@ -59,10 +62,11 @@ def make_client_id(box_name: str) -> str:
 
 class BoxAssistApp:
     def __init__(self, root: tk.Tk) -> None:
+        self._action_lock = threading.RLock()
         self.root = root
         self.root.title(f"L2 Box Assist v{APP_VERSION}")
-        self.root.geometry("1040x860")
-        self.root.minsize(900, 720)
+        self.root.geometry("1040x970")
+        self.root.minsize(900, 900)
         apply_dark_style(root)
 
         self.events: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -111,6 +115,7 @@ class BoxAssistApp:
         self.pairing_key_var = tk.StringVar(value=str(self.config["pairing_key"]))
         self.attack_output_key_var = tk.StringVar(value=str(self.config["attack_output_key"]))
         self.follow_output_key_var = tk.StringVar(value=str(self.config["follow_output_key"]))
+        self.dance_song_output_key_var = tk.StringVar(value=str(self.config["dance_song_output_key"]))
         self.hold_ms_var = tk.StringVar(value=str(self.config["hold_ms"]))
         self.target_process_var = tk.StringVar(value=str(self.config["target_process"]))
         self.require_focus_var = tk.BooleanVar(value=bool(self.config["require_target_foreground"]))
@@ -132,7 +137,7 @@ class BoxAssistApp:
         ttk.Label(outer, text=f"L2 Box Assist v{APP_VERSION}", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             outer,
-            text="Reçoit Attaquer ou Suivre du Main, puis joue la touche correspondante via le driver Logitech.",
+            text="Reçoit Attaquer, Suivre ou Dance/Song ciblé, puis joue la touche configurée via le driver Logitech.",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(2, 12))
 
@@ -179,10 +184,11 @@ class BoxAssistApp:
         add_labeled_entry(settings, 4, "Processus du jeu", self.target_process_var, column=0, width=24)
         add_labeled_entry(settings, 4, "Durée appui (ms)", self.hold_ms_var, column=2, width=18)
         add_labeled_entry(settings, 5, "Chemin de la DLL", self.dll_path_var, column=0, width=24)
+        add_labeled_entry(settings, 5, "Touche Box - Dance/Song", self.dance_song_output_key_var, column=2, width=18)
 
         focus_check = ttk.Checkbutton(
             settings,
-            text="Ne jamais injecter une touche si Lineage 2 n'est pas au premier plan sur cette Box",
+            text="Ne jamais injecter Attaquer/Suivre si L2 n'est pas au premier plan",
             variable=self.require_focus_var,
         )
         focus_check.grid(row=6, column=0, columnspan=4, sticky="w", pady=(5, 2))
@@ -193,8 +199,14 @@ class BoxAssistApp:
             style="Muted.TLabel",
         ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(2, 0))
 
+        ttk.Label(
+            settings,
+            text="Dance/Song: seul le pseudo choisi sur le Main reçoit la touche, après vérification du focus.",
+            style="Muted.TLabel",
+        ).grid(row=8, column=0, columnspan=4, sticky="w", pady=(2, 0))
+
         button_row = ttk.Frame(settings)
-        button_row.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(9, 0))
+        button_row.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(9, 0))
         ttk.Button(
             button_row,
             text="Enregistrer et reconnecter",
@@ -227,20 +239,22 @@ class BoxAssistApp:
         peers_frame.rowconfigure(0, weight=1)
         peers_frame.columnconfigure(0, weight=1)
 
-        columns = ("name", "ip", "attack", "follow", "connected", "result")
-        self.peer_tree = ttk.Treeview(peers_frame, columns=columns, show="headings", height=5)
+        columns = ("name", "ip", "attack", "follow", "dance_song", "connected", "result")
+        self.peer_tree = ttk.Treeview(peers_frame, columns=columns, show="headings", height=3)
         self.peer_tree.heading("name", text="Nom")
         self.peer_tree.heading("ip", text="Adresse IP")
         self.peer_tree.heading("attack", text="Attaquer")
         self.peer_tree.heading("follow", text="Suivre")
+        self.peer_tree.heading("dance_song", text="Dance/Song")
         self.peer_tree.heading("connected", text="Connectée depuis")
         self.peer_tree.heading("result", text="Dernière action")
         self.peer_tree.column("name", width=155, anchor="w")
         self.peer_tree.column("ip", width=120, anchor="w")
         self.peer_tree.column("attack", width=80, anchor="center")
         self.peer_tree.column("follow", width=80, anchor="center")
+        self.peer_tree.column("dance_song", width=90, anchor="center")
         self.peer_tree.column("connected", width=110, anchor="center")
-        self.peer_tree.column("result", width=360, anchor="w")
+        self.peer_tree.column("result", width=270, anchor="w")
         peer_scroll = ttk.Scrollbar(peers_frame, orient="vertical", command=self.peer_tree.yview)
         self.peer_tree.configure(yscrollcommand=peer_scroll.set)
         self.peer_tree.grid(row=0, column=0, sticky="nsew")
@@ -249,7 +263,7 @@ class BoxAssistApp:
         logs = ttk.LabelFrame(outer, text="Activité", padding=8)
         logs.pack(fill="both")
         logs.columnconfigure(0, weight=1)
-        self.log_widget, log_scroll = make_log_widget(logs, height=6)
+        self.log_widget, log_scroll = make_log_widget(logs, height=5)
         self.log_widget.grid(row=0, column=0, sticky="nsew")
         log_scroll.grid(row=0, column=1, sticky="ns")
 
@@ -265,9 +279,11 @@ class BoxAssistApp:
 
         attack_key = self.attack_output_key_var.get().strip()
         follow_key = self.follow_output_key_var.get().strip()
+        dance_song_key = self.dance_song_output_key_var.get().strip()
         foreground = get_foreground_info()
         attack_chord = resolve_key_spec(attack_key, foreground.keyboard_layout)
         follow_chord = resolve_key_spec(follow_key, foreground.keyboard_layout)
+        resolve_key_spec(dance_song_key, foreground.keyboard_layout)
         if chord_signature(attack_chord) == chord_signature(follow_chord):
             raise ConfigError("Les touches Box Attaquer et Suivre doivent être différentes.")
 
@@ -294,6 +310,7 @@ class BoxAssistApp:
             "pairing_key": pairing_key,
             "attack_output_key": attack_key,
             "follow_output_key": follow_key,
+            "dance_song_output_key": dance_song_key,
             "hold_ms": hold_ms,
             "target_process": target_process,
             "require_target_foreground": bool(self.require_focus_var.get()),
@@ -338,6 +355,7 @@ class BoxAssistApp:
             action_keys={
                 ACTION_ATTACK: str(config["attack_output_key"]),
                 ACTION_FOLLOW: str(config["follow_output_key"]),
+                ACTION_DANCE_SONG: str(config["dance_song_output_key"]),
             },
             main_host=str(config["main_host"]),
             port=int(config["port"]),
@@ -369,25 +387,28 @@ class BoxAssistApp:
         driver: LogitechInput,
         message: dict[str, Any],
     ) -> tuple[bool, str]:
-        action = normalize_action(message.get("action"))
-        if action == ACTION_ATTACK:
-            output_key = str(config["attack_output_key"])
-        elif action == ACTION_FOLLOW:
-            output_key = str(config["follow_output_key"])
-        else:
-            return False, "Action inconnue reçue du Main."
+        with self._action_lock:
+            action = normalize_action(message.get("action"))
+            if action == ACTION_DANCE_SONG:
+                return send_dance_song(config, driver, message)
+            if action == ACTION_ATTACK:
+                output_key = str(config["attack_output_key"])
+            elif action == ACTION_FOLLOW:
+                output_key = str(config["follow_output_key"])
+            else:
+                return False, "Action inconnue reçue du Main."
 
-        foreground = get_foreground_info()
-        if bool(config["require_target_foreground"]) and not foreground.matches(str(config["target_process"])):
-            active = foreground.process_name or "aucune fenêtre"
-            return False, f"Injection annulée: fenêtre active {active}, attendu {config['target_process']}."
+            foreground = get_foreground_info()
+            if bool(config["require_target_foreground"]) and not foreground.matches(str(config["target_process"])):
+                active = foreground.process_name or "aucune fenêtre"
+                return False, f"Injection annulée: fenêtre active {active}, attendu {config['target_process']}."
 
-        result = driver.tap(
-            output_key,
-            int(config["hold_ms"]),
-            foreground.keyboard_layout,
-        )
-        return result.ok, result.message
+            result = driver.tap(
+                output_key,
+                int(config["hold_ms"]),
+                foreground.keyboard_layout,
+            )
+            return result.ok, result.message
 
     def _save_and_reconnect(self) -> None:
         try:
@@ -563,6 +584,7 @@ class BoxAssistApp:
                 peer.get("ip", ""),
                 keys.get(ACTION_ATTACK, "?"),
                 keys.get(ACTION_FOLLOW, "?"),
+                keys.get(ACTION_DANCE_SONG, "?"),
                 format_clock(float(peer.get("connected_at", time.time()))),
                 peer.get("last_result", "En attente"),
             )

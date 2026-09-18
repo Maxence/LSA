@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import threading
 import time
 import tkinter as tk
 from pathlib import Path
@@ -22,7 +21,7 @@ from window_targeting import (
 )
 
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 MULTI_WINDOW_FOCUS_SETTLE_SEC = 0.060
 OUTPUT_DEFAULTS_VERSION = 2
 NEW_DEFAULT_ATTACK_KEY = "-"
@@ -86,10 +85,6 @@ def _walk_widgets(widget: tk.Misc) -> Iterable[tk.Misc]:
 class BoxAssistApp(base.BoxAssistApp):
     """Box Assist with an optional fan-out to every local Lineage 2 window."""
 
-    def __init__(self, root: tk.Tk) -> None:
-        self._multi_action_lock = threading.RLock()
-        super().__init__(root)
-
     def _load_config(self) -> dict[str, Any]:
         config = super()._load_config()
         changed = False
@@ -150,13 +145,13 @@ class BoxAssistApp(base.BoxAssistApp):
                         "Suivre joue '&' (touche physique 1)."
                     )
                 )
-            elif isinstance(widget, ttk.Checkbutton) and text.startswith("Ne jamais injecter une touche"):
+            elif isinstance(widget, ttk.Checkbutton) and text.startswith("Ne jamais injecter Attaquer/Suivre"):
                 widget.configure(text=text + " (mode simple uniquement)")
 
         multi_frame = ttk.LabelFrame(outer, text="Multi-fenêtres L2 (optionnel)", padding=8)
         ttk.Checkbutton(
             multi_frame,
-            text="Envoyer chaque commande à tous les L2.exe ouverts sur cette Box",
+            text="Envoyer Attaquer et Suivre à tous les L2.exe ouverts sur cette Box",
             variable=self.multi_window_var,
         ).pack(anchor="w")
         ttk.Label(
@@ -173,7 +168,7 @@ class BoxAssistApp(base.BoxAssistApp):
             multi_frame,
             text=(
                 "Le mode multi-fenêtres fonctionne même si Box Assist ou une autre application est au premier plan. "
-                "Le focus de chaque L2 est vérifié avant l'injection."
+                "Le focus de chaque L2 est vérifié avant l'injection. Dance/Song reste limité au pseudo choisi sur le Main."
             ),
             style="Muted.TLabel",
             wraplength=940,
@@ -217,18 +212,18 @@ class BoxAssistApp(base.BoxAssistApp):
         driver: LogitechInput,
         message: dict[str, Any],
     ) -> tuple[bool, str]:
-        if not bool(config.get("multi_window_enabled", False)):
-            return super()._handle_remote_action(config, driver, message)
+        with self._action_lock:
+            action = base.normalize_action(message.get("action"))
+            if action == base.ACTION_DANCE_SONG or not bool(config.get("multi_window_enabled", False)):
+                return super()._handle_remote_action(config, driver, message)
 
-        action = base.normalize_action(message.get("action"))
-        if action == base.ACTION_ATTACK:
-            output_key = str(config["attack_output_key"])
-        elif action == base.ACTION_FOLLOW:
-            output_key = str(config["follow_output_key"])
-        else:
-            return False, "Action inconnue reçue du Main."
+            if action == base.ACTION_ATTACK:
+                output_key = str(config["attack_output_key"])
+            elif action == base.ACTION_FOLLOW:
+                output_key = str(config["follow_output_key"])
+            else:
+                return False, "Action inconnue reçue du Main."
 
-        with self._multi_action_lock:
             original = get_foreground_info()
             target_process = str(config["target_process"])
             targets = self._ordered_targets(list_target_windows(target_process), int(original.hwnd))

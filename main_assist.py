@@ -13,6 +13,7 @@ from typing import Any, Callable
 from assist_common import (
     ACTION_ATTACK,
     ACTION_FOLLOW,
+    ACTION_DANCE_SONG,
     ACTION_IDS,
     APP_DIR,
     ConfigError,
@@ -29,13 +30,14 @@ from assist_common import (
     resolve_key_spec,
     save_json_config,
     validate_pairing_key,
+    validate_character_name,
     validate_port,
 )
 from assist_network import MainAssistServer
 from ui_utils import add_labeled_entry, append_log, apply_dark_style, make_log_widget
 
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.4"
 CONFIG_PATH = APP_DIR / "main_settings.json"
 
 
@@ -53,6 +55,9 @@ MAIN_DEFAULTS: dict[str, Any] = {
     "pairing_key": "",
     "attack_trigger_key": "F2",
     "follow_trigger_key": "F3",
+    "dance_song_enabled": False,
+    "dance_song_trigger_key": "F10",
+    "dance_song_character": "",
     "target_process": "L2.exe",
     "require_target_foreground": True,
     "poll_interval_ms": 10,
@@ -84,7 +89,7 @@ class HotkeyWatcher:
                 trigger_key=action_triggers[action],
                 chord=resolve_key_spec(action_triggers[action], foreground.keyboard_layout),
             )
-            for action in ACTION_IDS
+            for action in ACTION_IDS if action in action_triggers
         )
         self.target_process = target_process
         self.require_target_foreground = require_target_foreground
@@ -182,8 +187,8 @@ class MainAssistApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(f"L2 Main Assist v{APP_VERSION}")
-        self.root.geometry("1040x820")
-        self.root.minsize(900, 700)
+        self.root.geometry("1040x900")
+        self.root.minsize(900, 780)
         apply_dark_style(root)
 
         self.events: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -230,6 +235,9 @@ class MainAssistApp:
         self.main_name_var = tk.StringVar(value=str(self.config["main_name"]))
         self.attack_trigger_key_var = tk.StringVar(value=str(self.config["attack_trigger_key"]))
         self.follow_trigger_key_var = tk.StringVar(value=str(self.config["follow_trigger_key"]))
+        self.dance_song_enabled_var = tk.BooleanVar(value=bool(self.config["dance_song_enabled"]))
+        self.dance_song_trigger_key_var = tk.StringVar(value=str(self.config["dance_song_trigger_key"]))
+        self.dance_song_character_var = tk.StringVar(value=str(self.config["dance_song_character"]))
         self.target_process_var = tk.StringVar(value=str(self.config["target_process"]))
         self.port_var = tk.StringVar(value=str(self.config["port"]))
         self.discovery_port_var = tk.StringVar(value=str(self.config["discovery_port"]))
@@ -252,7 +260,7 @@ class MainAssistApp:
         ttk.Label(outer, text=f"L2 Main Assist v{APP_VERSION}", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             outer,
-            text="Écoute deux actions lorsque Lineage 2 est au premier plan, puis les diffuse à toutes les Box.",
+            text="Diffuse Attaquer et Suivre aux Box. Dance/Song peut cibler un personnage précis en option.",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(2, 12))
 
@@ -284,21 +292,39 @@ class MainAssistApp:
         add_labeled_entry(settings, 2, "Port découverte UDP", self.discovery_port_var, column=2, width=18)
         add_labeled_entry(settings, 3, "Clé d'appairage", self.pairing_key_var, column=0, width=24)
 
+        ttk.Checkbutton(
+            settings,
+            text="Activer Dance/Song ciblé (optionnel)",
+            variable=self.dance_song_enabled_var,
+            command=self._update_dance_song_controls,
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(5, 2))
+        self.dance_song_test_button = ttk.Button(
+            settings, text="Tester Dance/Song", command=lambda: self._send_test(ACTION_DANCE_SONG)
+        )
+        self.dance_song_test_button.grid(row=4, column=3, sticky="e")
+        self.dance_song_trigger_entry = add_labeled_entry(
+            settings, 5, "Touche Main - Dance/Song", self.dance_song_trigger_key_var, column=0, width=24
+        )
+        self.dance_song_character_entry = add_labeled_entry(
+            settings, 5, "Pseudo exact Dance/Song", self.dance_song_character_var, column=2, width=18
+        )
+        self._update_dance_song_controls()
+
         focus_check = ttk.Checkbutton(
             settings,
             text="Ne réagir que si le processus configuré est au premier plan",
             variable=self.require_focus_var,
         )
-        focus_check.grid(row=4, column=0, columnspan=4, sticky="w", pady=(5, 2))
+        focus_check.grid(row=6, column=0, columnspan=4, sticky="w", pady=(5, 2))
 
         ttk.Label(
             settings,
             text="Par défaut: F2 diffuse Attaquer, F3 diffuse Suivre. Les touches jouées sont choisies sur chaque Box.",
             style="Muted.TLabel",
-        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(2, 0))
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(2, 0))
 
         button_row = ttk.Frame(settings)
-        button_row.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        button_row.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         ttk.Button(
             button_row,
             text="Enregistrer et redémarrer",
@@ -333,20 +359,22 @@ class MainAssistApp:
         peers_frame.rowconfigure(0, weight=1)
         peers_frame.columnconfigure(0, weight=1)
 
-        columns = ("name", "ip", "attack", "follow", "connected", "result")
+        columns = ("name", "ip", "attack", "follow", "dance_song", "connected", "result")
         self.peer_tree = ttk.Treeview(peers_frame, columns=columns, show="headings", height=5)
         self.peer_tree.heading("name", text="Nom")
         self.peer_tree.heading("ip", text="Adresse IP")
         self.peer_tree.heading("attack", text="Attaquer")
         self.peer_tree.heading("follow", text="Suivre")
+        self.peer_tree.heading("dance_song", text="Dance/Song")
         self.peer_tree.heading("connected", text="Connectée depuis")
         self.peer_tree.heading("result", text="Dernière action")
         self.peer_tree.column("name", width=145, anchor="w")
         self.peer_tree.column("ip", width=120, anchor="w")
         self.peer_tree.column("attack", width=80, anchor="center")
         self.peer_tree.column("follow", width=80, anchor="center")
+        self.peer_tree.column("dance_song", width=90, anchor="center")
         self.peer_tree.column("connected", width=110, anchor="center")
-        self.peer_tree.column("result", width=390, anchor="w")
+        self.peer_tree.column("result", width=300, anchor="w")
         peer_scroll = ttk.Scrollbar(peers_frame, orient="vertical", command=self.peer_tree.yview)
         self.peer_tree.configure(yscrollcommand=peer_scroll.set)
         self.peer_tree.grid(row=0, column=0, sticky="nsew")
@@ -358,6 +386,12 @@ class MainAssistApp:
         self.log_widget, log_scroll = make_log_widget(logs, height=6)
         self.log_widget.grid(row=0, column=0, sticky="nsew")
         log_scroll.grid(row=0, column=1, sticky="ns")
+
+    def _update_dance_song_controls(self) -> None:
+        state = "normal" if self.dance_song_enabled_var.get() else "disabled"
+        self.dance_song_trigger_entry.configure(state=state)
+        self.dance_song_character_entry.configure(state=state)
+        self.dance_song_test_button.configure(state=state)
 
     def _emit_generation_event(self, generation: int, event: dict[str, Any]) -> None:
         tagged = dict(event)
@@ -378,6 +412,15 @@ class MainAssistApp:
                 "(par exemple F2 et F3, pas F2 et CTRL+F2)."
             )
 
+        dance_song_enabled = bool(self.dance_song_enabled_var.get())
+        dance_song_trigger = self.dance_song_trigger_key_var.get().strip()
+        dance_song_character = self.dance_song_character_var.get().strip()
+        if dance_song_enabled:
+            dance_song_character = validate_character_name(self.dance_song_character_var.get())
+            dance_song_chord = resolve_key_spec(dance_song_trigger, foreground.keyboard_layout)
+            if dance_song_chord.vk_code in (attack_chord.vk_code, follow_chord.vk_code):
+                raise ConfigError("Dance/Song doit utiliser une touche physique différente d'Attaquer et Suivre.")
+
         target_process = self.target_process_var.get().strip()
         if not target_process:
             raise ConfigError("Le processus du jeu ne peut pas être vide.")
@@ -390,6 +433,9 @@ class MainAssistApp:
             "pairing_key": validate_pairing_key(self.pairing_key_var.get()),
             "attack_trigger_key": attack_trigger,
             "follow_trigger_key": follow_trigger,
+            "dance_song_enabled": dance_song_enabled,
+            "dance_song_trigger_key": dance_song_trigger,
+            "dance_song_character": dance_song_character,
             "target_process": target_process,
             "require_target_foreground": bool(self.require_focus_var.get()),
             "poll_interval_ms": 10,
@@ -414,11 +460,14 @@ class MainAssistApp:
             server.start()
             self.server = server
 
+            action_triggers = {
+                ACTION_ATTACK: str(config["attack_trigger_key"]),
+                ACTION_FOLLOW: str(config["follow_trigger_key"]),
+            }
+            if config["dance_song_enabled"]:
+                action_triggers[ACTION_DANCE_SONG] = str(config["dance_song_trigger_key"])
             watcher = HotkeyWatcher(
-                action_triggers={
-                    ACTION_ATTACK: str(config["attack_trigger_key"]),
-                    ACTION_FOLLOW: str(config["follow_trigger_key"]),
-                },
+                action_triggers=action_triggers,
                 target_process=str(config["target_process"]),
                 require_target_foreground=bool(config["require_target_foreground"]),
                 poll_interval_ms=int(config["poll_interval_ms"]),
@@ -447,7 +496,16 @@ class MainAssistApp:
             return str(self.config["attack_trigger_key"])
         if action == ACTION_FOLLOW:
             return str(self.config["follow_trigger_key"])
+        if action == ACTION_DANCE_SONG:
+            return str(self.config["dance_song_trigger_key"])
         return "?"
+
+    def _target_for_action(self, action: str) -> str:
+        if action != ACTION_DANCE_SONG:
+            return ""
+        if not self.config.get("dance_song_enabled", False):
+            raise ConfigError("Dance/Song est désactivé. Active l'option puis enregistre les réglages.")
+        return validate_character_name(self.config.get("dance_song_character"))
 
     def _on_hotkey_trigger(self, action: str, _foreground: ForegroundInfo) -> None:
         server = self.server
@@ -456,6 +514,7 @@ class MainAssistApp:
                 action=action,
                 trigger=self._trigger_for_action(action),
                 source="hotkey",
+                target_character=self._target_for_action(action),
             )
 
     def _save_and_restart(self) -> None:
@@ -475,11 +534,18 @@ class MainAssistApp:
             self._log("Le serveur n'est pas démarré.", "error")
             return
 
+        try:
+            target_character = self._target_for_action(action)
+        except ConfigError as exc:
+            self._log(str(exc), "warning")
+            return
         generation = self.service_generation
 
         def worker() -> None:
             try:
-                server.broadcast_action(action=action, trigger="TEST", source="button")
+                server.broadcast_action(
+                    action=action, trigger="TEST", source="button", target_character=target_character
+                )
             except Exception as exc:
                 self._emit_generation_event(
                     generation,
@@ -565,7 +631,14 @@ class MainAssistApp:
             label = action_label(event.get("action"))
             source = "test manuel" if event.get("source") == "button" else f"touche {event.get('trigger')}"
             level = "success" if sent else "warning"
-            self._log(f"{label} envoyé par {source}: {sent}/{connected} Box.", level)
+            target = event.get("target_character")
+            target_detail = f" pour {target!r}" if target else ""
+            self._log(f"{label}{target_detail} envoyé par {source}: {sent}/{connected} Box.", level)
+            if event.get("unsupported"):
+                self._log(
+                    f"{event['unsupported']} Box ne prennent pas en charge Dance/Song: mettre leurs scripts à jour.",
+                    "warning",
+                )
         elif event_type == "ack":
             level = "success" if event.get("ok") else "error"
             prefix = "OK" if event.get("ok") else "ÉCHEC"
@@ -610,6 +683,7 @@ class MainAssistApp:
                 peer["ip"],
                 keys.get(ACTION_ATTACK, "?"),
                 keys.get(ACTION_FOLLOW, "?"),
+                keys.get(ACTION_DANCE_SONG, "?"),
                 format_clock(float(peer["connected_at"])),
                 peer["last_result"],
             )

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from assist_common import (
+    ACTION_DANCE_SONG,
     ACTION_IDS,
     MAX_MESSAGE_BYTES,
     PROTOCOL_VERSION,
@@ -21,6 +22,7 @@ from assist_common import (
     normalize_action,
     send_json_line,
     utc_timestamp,
+    validate_character_name,
 )
 
 
@@ -297,7 +299,7 @@ class MainAssistServer:
                 return
             action_keys = {
                 action: clean_text(raw_action_keys.get(action), max_length=32, fallback="?")
-                for action in ACTION_IDS
+                for action in ACTION_IDS if action in raw_action_keys
             }
             now = utc_timestamp()
             peer = PeerConnection(
@@ -428,12 +430,23 @@ class MainAssistServer:
                     _close_socket(peer.sock)
             _safe_emit(self.event_callback, "peers", boxes=boxes)
 
-    def broadcast_action(self, *, action: str, trigger: str, source: str = "hotkey") -> tuple[str, int]:
+    def broadcast_action(
+        self,
+        *,
+        action: str,
+        trigger: str,
+        source: str = "hotkey",
+        target_character: str = "",
+    ) -> tuple[str, int]:
         if not self.running:
             raise RuntimeError("Le serveur Main n'est pas démarré.")
         normalized_action = normalize_action(action)
         if not normalized_action:
             raise ValueError(f"Action inconnue: {action!r}")
+        if normalized_action == ACTION_DANCE_SONG:
+            target_character = validate_character_name(target_character)
+        elif target_character:
+            raise ValueError("Seule Dance/Song accepte un personnage ciblé.")
 
         # The lock keeps command order identical for every Box, even if a UI
         # test button and a physical hotkey fire at almost the same moment.
@@ -453,8 +466,17 @@ class MainAssistServer:
             with self._peers_lock:
                 peers = list(self._peers.values())
 
+            if normalized_action == ACTION_DANCE_SONG:
+                payload["target_character"] = target_character
+
             sent = 0
+            unsupported = 0
             for peer in peers:
+                # Old v2 Boxes advertise only attack/follow. Do not send them
+                # a targeted command they cannot interpret safely.
+                if normalized_action == ACTION_DANCE_SONG and ACTION_DANCE_SONG not in peer.action_keys:
+                    unsupported += 1
+                    continue
                 if send_json_line(peer.sock, peer.send_lock, payload):
                     sent += 1
                 else:
@@ -469,6 +491,8 @@ class MainAssistServer:
             source=payload["source"],
             sent=sent,
             connected=len(peers),
+            target_character=target_character,
+            unsupported=unsupported,
         )
         return event_id, sent
 
@@ -597,7 +621,7 @@ class BoxAssistClient:
         self.box_name = clean_text(box_name, max_length=60, fallback="Box")
         self.action_keys = {
             action: clean_text(action_keys.get(action), max_length=32, fallback="?")
-            for action in ACTION_IDS
+            for action in ACTION_IDS if action in action_keys
         }
         self.main_host = clean_text(main_host, max_length=255, fallback="AUTO")
         self.port = int(port)

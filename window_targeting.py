@@ -178,6 +178,29 @@ def list_target_windows(targets: str) -> list[TargetWindow]:
     return sorted(candidates.values(), key=lambda item: (item.process_id, item.hwnd))
 
 
+def matching_character_windows(windows: list[TargetWindow], character: str) -> list[TargetWindow]:
+    """Match a whole title, case-insensitively. Never use substring matching."""
+    expected = character.strip().casefold()
+    if not expected:
+        return []
+    return [window for window in windows if window.title.strip().casefold() == expected]
+
+
+def window_still_matches(window: TargetWindow, targets: str, character: str) -> bool:
+    """Reject a closed/reused HWND, changed process, or changed character title."""
+    if not is_window_valid(window.hwnd):
+        return False
+    pid = wintypes.DWORD(0)
+    thread_id = int(_user32.GetWindowThreadProcessId(window.hwnd, ctypes.byref(pid)) or 0)
+    return (
+        int(pid.value) == window.process_id
+        and thread_id == window.thread_id
+        and _process_name(int(pid.value)).lower() in parse_target_processes(targets)
+        and bool(character.strip())
+        and _window_title(window.hwnd).casefold() == character.strip().casefold()
+    )
+
+
 def is_window_valid(hwnd: int) -> bool:
     return bool(IS_WINDOWS and hwnd and _user32.IsWindow(hwnd))
 

@@ -26,9 +26,11 @@ APP_DIR = Path(__file__).resolve().parent
 
 ACTION_ATTACK = "attack"
 ACTION_FOLLOW = "follow"
+ACTION_DANCE_SONG = "dance_song"
 ACTION_LABELS: dict[str, str] = {
     ACTION_ATTACK: "Attaquer",
     ACTION_FOLLOW: "Suivre",
+    ACTION_DANCE_SONG: "Dance/Song",
 }
 ACTION_IDS = tuple(ACTION_LABELS)
 
@@ -94,6 +96,19 @@ def clean_text(value: Any, *, max_length: int = 80, fallback: str = "") -> str:
     text = str(value or "").strip()
     text = "".join(ch for ch in text if ch >= " " and ch not in "\r\n")
     return (text[:max_length] or fallback).strip()
+
+
+def validate_character_name(value: Any) -> str:
+    """Validate without truncating or rewriting a potentially different target."""
+    if not isinstance(value, str):
+        raise ConfigError("Le pseudo Dance/Song doit être du texte.")
+    # Check before strip(): embedded or trailing control characters are invalid.
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ConfigError("Le pseudo Dance/Song contient un caractère de contrôle.")
+    name = value.strip()
+    if not name or len(name) > 64:
+        raise ConfigError("Renseigne le pseudo complet Dance/Song (1 à 64 caractères).")
+    return name
 
 
 def normalize_action(value: Any) -> str:

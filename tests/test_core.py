@@ -157,6 +157,7 @@ class ActionRoutingTests(unittest.TestCase):
 
     def test_box_maps_actions_to_their_own_keys(self) -> None:
         app = BoxAssistApp.__new__(BoxAssistApp)
+        app._action_lock = threading.RLock()
         sent: list[tuple[str, int, int]] = []
 
         class FakeDriver:
@@ -182,6 +183,7 @@ class ActionRoutingTests(unittest.TestCase):
 
     def test_box_cancels_injection_outside_lineage(self) -> None:
         app = BoxAssistApp.__new__(BoxAssistApp)
+        app._action_lock = threading.RLock()
 
         class FailIfCalledDriver:
             def tap(self, *_args, **_kwargs):
